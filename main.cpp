@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <glload/gl_3_3.h>
 #include <glload/gll.h>
+#include <glm/glm.hpp>
+#include <glm/gtc/type_ptr.hpp>
 #include <GL/freeglut.h>
 
 
@@ -12,9 +14,12 @@ const std::string strVertexShader(
 	"layout(location = 0) in vec4 position;\n"
 	"layout(location = 1) in vec4 color;\n"
 	"smooth out vec4 theColor;\n"
+	"uniform mat4 modelToCameraMatrix;\n"
+	"uniform mat4 cameraToClipMatrix;\n"
 	"void main()\n"
 	"{\n"
-	"   gl_Position = position;\n"
+	"   vec4 newPosition = modelToCameraMatrix * position;\n"
+	"	gl_Position = cameraToClipMatrix * newPosition;\n"
 	"	theColor = color;\n"
 	"}\n"
 	);
@@ -32,16 +37,6 @@ const std::string myStrFragmentShader(
 GLuint vertexShader, fragmentShader;
 
 const float cubeVertexData[] = {
-/*	-1.0f, -1.0f, -1.0f,
-	1.0f, -1.0f, -1.0f,
-	1.0f, 1.0f, -1.0f,
-	-1.0f, 1.0f, -1.0f,
-
-	-1.0f, -1.0f, 1.0f,
-	1.0f, -1.0f, 1.0f,
-	1.0f, 1.0f, 1.0f,
-	-1.0f, 1.0f, 1.0f,
-*/
 	-0.5f, -0.5f, -0.5f,
 	0.5f, -0.5f, -0.5f,
 	0.5f, 0.5f, -0.5f,
@@ -52,15 +47,15 @@ const float cubeVertexData[] = {
 	0.5f, 0.5f, 0.5f,
 	-0.5f, 0.5f, 0.5f,
 
-	0.5f, 1.0f, 0.5f, 1.0f,
-	0.5f, 0.7f, 0.7f, 1.0f,
-	0.5f, 0.5f, 1.0f, 1.0f,
-	0.5f, 0.7f, 0.7f, 1.0f,
+	0.0f, 1.0f, 0.0f, 1.0f,
+	0.0f, 1.0f, 0.0f, 1.0f,
+	1.0f, 0.0f, 0.0f, 1.0f,
+	1.0f, 0.0f, 0.0f, 1.0f,
 
-	0.5f, 0.5f, 1.0f, 1.0f,
-	0.7f, 0.5f, 0.7f, 1.0f,
-	1.0f, 0.5f, 1.0f, 1.0f,
-	0.7f, 0.5f, 0.7f, 1.0f
+	0.0f, 0.0f, 1.0f, 1.0f,
+	0.0f, 0.0f, 1.0f, 1.0f,
+	1.0f, 1.0f, 1.0f, 1.0f,
+	1.0f, 1.0f, 1.0f, 1.0f
 };
 
 const GLshort cubeIndexData[] = 
@@ -83,6 +78,56 @@ const GLshort cubeIndexData[] =
 	0, 1, 5,
 	0, 5, 4,
 };
+
+float rotateX = 0;
+float rotateY = 0;
+
+glm::mat4 getRotateMatrix()
+{
+	glm::mat4 matx(1);
+	matx[0].x = cos(rotateX);
+	matx[0].y = sin(rotateX);
+	matx[1].x = -sin(rotateX);
+	matx[1].y = cos(rotateX);
+
+	glm::mat4 maty(1);
+	maty[1].y = cos(rotateY);
+	maty[1].z = sin(rotateY);
+	maty[2].y = -sin(rotateY);
+	maty[2].z = cos(rotateY);
+
+	glm::mat4 matt(1);
+	matt[3] = glm::vec4(0, 0, 1, 1);
+	
+	return matt * maty * matx;
+}
+
+glm::mat4 getcameraToClipMatrix(int w, int h)
+{
+	const float znear = 0;
+	const float zfar = 10;
+	const float angle = 45.0 / 180.0 * 3.1415;
+
+	glm::mat4 mat(1);
+	if(!(angle > 3.1414 / 2 && angle < 3.1416 / 2))
+	{
+		mat[0].x = h * 1.0f / w / tan(angle);
+		mat[1].y = 1 / tan(angle);
+	}
+	else
+	{
+		mat[0].x = h * 1.0f / w;
+		mat[1].y = 1;
+	}
+	if(znear != zfar)
+	{
+		mat[2].z = (-znear - zfar) / (znear - zfar);
+		mat[2].w = 1;
+		mat[3].z = 2 * zfar * znear / (znear - zfar);
+		mat[3].w = 1;
+	}
+	return mat;
+}
 
 GLuint vertexBufferObject;
 GLuint indexBufferObject;
@@ -118,14 +163,14 @@ void init()
 
 	glBindVertexArray(0);
 
-/*	glEnable(GL_CULL_FACE);
+	glEnable(GL_CULL_FACE);
 	glCullFace(GL_BACK);
 	glFrontFace(GL_CW);
 
 	glEnable(GL_DEPTH_TEST);
 	glDepthMask(GL_TRUE);
 	glDepthFunc(GL_LEQUAL);
-	glDepthRange(0.0f, 1.0f); */
+	glDepthRange(0.0f, 1.0f); 
 }
 
 GLuint CreateShader(GLenum eShaderType, const std::string &strShaderFile)
@@ -188,8 +233,9 @@ GLuint CreateProgram(const std::vector<GLuint> &shaderList)
 	return program;
 }
 
-GLuint theProgram;
 GLuint myProgram;
+GLuint modelToCameraMatrixUnif;
+GLuint cameraToClipMatrix;
 
 void loadShaders()
 {
@@ -199,12 +245,18 @@ void loadShaders()
 	myshaderList.push_back(CreateShader(GL_VERTEX_SHADER, strVertexShader));
 	myshaderList.push_back(CreateShader(GL_FRAGMENT_SHADER, myStrFragmentShader));
 	myProgram = CreateProgram(myshaderList);
+	modelToCameraMatrixUnif = glGetUniformLocation(myProgram, "modelToCameraMatrix");
+	cameraToClipMatrix = glGetUniformLocation(myProgram, "cameraToClipMatrix");
+	glUseProgram(myProgram);
+	glm::mat4 mat = getRotateMatrix();
+	glUniformMatrix4fv(modelToCameraMatrixUnif, 1, GL_FALSE, glm::value_ptr(mat));
+	glUseProgram(0);
 	std::for_each(myshaderList.begin(), myshaderList.end(), glDeleteShader);
 }
 
 void display()
 {
-	glClear(GL_COLOR_BUFFER_BIT);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glUseProgram(myProgram);
 	glBindVertexArray(vao);
 	glDrawElements(GL_TRIANGLES, sizeof(cubeIndexData) / sizeof(cubeIndexData[0]), GL_UNSIGNED_SHORT, 0);
@@ -220,10 +272,44 @@ void display()
 	glFlush();
 }
 
+void reshape(int w, int h)
+{
+	glUseProgram(myProgram);
+	glm::mat4 mat = getcameraToClipMatrix(w, h);
+	glUniformMatrix4fv(cameraToClipMatrix, 1, GL_FALSE, glm::value_ptr(mat));
+	glUseProgram(0);
+	glViewport(0, 0, (GLsizei) w, (GLsizei) h);
+	glutPostRedisplay();
+}
+
 void keyboard(unsigned char key, int x, int y)
 {
-	if(key == 27)
+	switch(key)
+	{
+	case 27:
 		exit(0);
+		break;
+	case 'a':
+		rotateX += 5 / 180.0f;
+		break;
+	case 'd':
+		rotateX -= 5 / 180.0f;
+		break;
+	case 'w':
+		rotateY += 5 / 180.0f;
+		break;
+	case 's':
+		rotateY -= 5 / 180.0f;
+		break;
+	}
+	if(key == 's' || key == 'w' || key == 'a' || key == 'd')
+	{
+		glUseProgram(myProgram);
+		glm::mat4 mat = getRotateMatrix();
+		glUniformMatrix4fv(modelToCameraMatrixUnif, 1, GL_FALSE, glm::value_ptr(mat));
+		glUseProgram(0);
+		glutPostRedisplay();
+	}
 }
 
 int main(int argc, char **argv)
@@ -237,6 +323,7 @@ int main(int argc, char **argv)
 	loadShaders();
 	initializeVertexObject();
 	init();
+	glutReshapeFunc(reshape);
 	glutDisplayFunc(display);
 	glutKeyboardFunc(keyboard);
 	glutMainLoop();
